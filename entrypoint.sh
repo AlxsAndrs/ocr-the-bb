@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-CREDS_FILE=/run/secrets/smb_creds
 MOUNT_POINT=/mnt/smb
 INPUT_DIR="$MOUNT_POINT/input"
 PROCESSING_DIR="$MOUNT_POINT/processing"
@@ -14,7 +13,7 @@ mkdir -p "$MOUNT_POINT"
 
 echo "Mounting $SMB_SERVER to $MOUNT_POINT"
 mount -t cifs "$SMB_SERVER" "$MOUNT_POINT" \
-	-o credentials="$CREDS_FILE",domain="$SMB_DOMAIN",vers=3.0,sec=ntlmv2,iocharset=utf8
+	-o username="$SMB_USERNAME",password="$SMB_PASSWORD",domain="$SMB_DOMAIN",vers=3.0,sec=ntlmv2,iocharset=utf8
 
 for d in "$INPUT_DIR" "$PROCESSING_DIR" "$OUTPUT_DIR" "$DONE_DIR" "$FAILED_DIR"; do
 	mkdir -p "$d"
