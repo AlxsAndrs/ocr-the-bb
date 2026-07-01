@@ -8,14 +8,17 @@ services:
     environment:
       - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
     volumes:
-      - /opt/ocr/ocr_data:/mnt/smb
+      - ocr_data:/mnt/smb
 
   smb-gateway:
     image: dperson/samba
     container_name: ocr-smb-gateway
     restart: unless-stopped
+    environment:
+      - USER=${SMB_GATEWAY_USER}
+      - SHARE=OCR;/mnt/smb;yes;no;no;${SMB_GATEWAY_USERNAME}
     volumes:
-      - /opt/ocr/ocr_data:/mnt/smb
+      - ocr_data:/mnt/smb
     ports:
       - "139:139"
       - "445:445"
