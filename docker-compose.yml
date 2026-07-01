@@ -12,6 +12,7 @@ services:
       - SMB_USERNAME=${SMB_USERNAME}
       - SMB_PASSWORD=${SMB_PASSWORD}
       - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
+    privileged: true
     cap_add:
       - SYS_ADMIN
       - DAC_READ_SEARCH
