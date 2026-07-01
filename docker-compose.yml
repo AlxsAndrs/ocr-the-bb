@@ -1,0 +1,20 @@
+services:
+  ocr-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ocr-service
+    restart: unless-stopped
+    environment:
+      - SMB_SERVER=${SMB_SERVER}
+      - SMB_USERNAME=${SMB_USERNAME}
+      - SMB_DOMAIN=${SMB_DOMAIN}
+      - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
+    volumes:
+      - ./smb_creds:/run/secrets/smb_creds:ro
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
