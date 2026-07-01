@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: ocr-service
     restart: unless-stopped
+    entrypoint: ["sleep", "infinity"]
     environment:
       - SMB_SERVER=${SMB_SERVER}
       - SMB_DOMAIN=${SMB_DOMAIN}
