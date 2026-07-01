@@ -9,12 +9,6 @@ DONE_DIR="$MOUNT_POINT/done"
 FAILED_DIR="$MOUNT_POINT/failed"
 LANGUAGES="${OCR_LANGUAGES:-eng+fra}"
 
-mkdir -p "$MOUNT_POINT"
-
-echo "Mounting $SMB_SERVER to $MOUNT_POINT"
-mount -t cifs "$SMB_SERVER" "$MOUNT_POINT" \
-	-o username="$SMB_USERNAME",password="$SMB_PASSWORD",domain="$SMB_DOMAIN",vers=3.0,sec=ntlmv2,iocharset=utf8
-
 for d in "$INPUT_DIR" "$PROCESSING_DIR" "$OUTPUT_DIR" "$DONE_DIR" "$FAILED_DIR"; do
 	mkdir -p "$d"
 done
