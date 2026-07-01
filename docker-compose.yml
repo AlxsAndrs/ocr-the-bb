@@ -14,7 +14,9 @@ services:
       - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
     cap_add:
       - SYS_ADMIN
+      - DAC_READ_SEARCH
     devices:
       - /dev/fuse
     security_opt:
       - apparmor:unconfined
+      - no-new-privileges:false
