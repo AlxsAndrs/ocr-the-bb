@@ -1,27 +1,11 @@
 services:
-  ocr-service:
+  ocr-api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ocr-service
+    container_name: ocr-api
     restart: unless-stopped
     environment:
       - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
-    volumes:
-      - ocr_data:/mnt/smb
-
-  smb-gateway:
-    image: dperson/samba
-    container_name: ocr-smb-gateway
-    restart: unless-stopped
-    environment:
-      - USER=${SMB_GATEWAY_USER}
-      - SHARE=OCR;/mnt/smb;yes;no;no;${SMB_GATEWAY_USERNAME}
-    volumes:
-      - ocr_data:/mnt/smb
     ports:
-      - "139:139"
-      - "445:445"
-
-volumes:
-  ocr_data:
+      - "8000:8000"
