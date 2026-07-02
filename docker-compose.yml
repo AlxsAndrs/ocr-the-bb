@@ -8,4 +8,4 @@ services:
     environment:
       - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
     ports:
-      - "8000:8000"
+      - "8100:8100"
