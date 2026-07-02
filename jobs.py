@@ -122,7 +122,10 @@ class JobStore:
             error = "Encrypted PDF is not supported."
         except Exception as exc:
             new_status = JobStatus.FAILED
-            error = f"OCR failed: {exc}"
+            detail = str(exc).strip() or repr(exc)
+            error = f"{type(exc).__name__}: {detail}"
+            import traceback
+            traceback.print_exc()
 
         with self._lock:
             job.status = new_status
