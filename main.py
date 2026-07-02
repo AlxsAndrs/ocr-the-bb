@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from jobs import JobStatus, JobStore
 
-DEFAULT_LANGUAGES = os.environ.get("OCR_LANGUAGES", "eng+fra")
+DEFAULT_LANGUAGES = os.environ.get("OCR_LANGUAGES", "fra+eng")
 MAX_WORKERS = int(os.environ.get("OCR_MAX_WORKERS", "2"))
 RESULT_TTL_SECONDS = int(os.environ.get("OCR_RESULT_TTL", "3600"))
 CLEANUP_INTERVAL_SECONDS = 300
@@ -38,6 +38,11 @@ def ocr(
     file: UploadFile = File(...),
     languages: str = Query(default=DEFAULT_LANGUAGES),
     force: bool = Query(default=False),
+    oversample: int = Query(default=0),
+    deskew: bool = Query(default=False),
+    clean: bool = Query(default=False),
+    optimize: int = Query(default=1),
+    output_type: str = Query(default="pdfa"),
 ):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
@@ -49,14 +54,24 @@ def ocr(
     with input_path.open("wb") as f:
         f.write(file.file.read())
 
+    ocr_kwargs = dict(
+        language=languages,
+        force_ocr=force,
+        skip_text=not force,
+        deskew=deskew,
+        clean=clean,
+        optimize=optimize,
+        output_type=output_type,
+        progress_bar=False,
+    )
+    if oversample and oversample > 0:
+        ocr_kwargs["oversample"] = oversample
+
     try:
         ocrmypdf.ocr(
             input_path,
             output_path,
-            language=languages,
-            force_ocr=force,
-            skip_text=not force,
-            progress_bar=False,
+            **ocr_kwargs,
         )
     except ocrmypdf.exceptions.PriorOcrFoundError:
         raise HTTPException(
@@ -81,6 +96,11 @@ def create_jobs(
     files: list[UploadFile] = File(...),
     languages: str = Query(default=DEFAULT_LANGUAGES),
     force: bool = Query(default=False),
+    oversample: int = Query(default=0),
+    deskew: bool = Query(default=False),
+    clean: bool = Query(default=False),
+    optimize: int = Query(default=1),
+    output_type: str = Query(default="pdfa"),
 ):
     pdfs = [f for f in files if f.filename.lower().endswith(".pdf")]
     if not pdfs:
@@ -103,6 +123,11 @@ def create_jobs(
             output_path=output_path,
             languages=languages,
             force=force,
+            oversample=oversample,
+            deskew=deskew,
+            clean=clean,
+            optimize=optimize,
+            output_type=output_type,
         )
         jobs_out.append({"job_id": job.job_id, "filename": job.filename})
 
