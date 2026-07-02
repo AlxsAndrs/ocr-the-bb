@@ -1,18 +1,23 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 RUN apt-get update && apt-get install -y \
 	ocrmypdf \
 	tesseract-ocr-eng \
 	tesseract-ocr-fra \
-	cifs-utils \
-	inotify-tools \
+	python3 \
+	python3-pip \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /mnt/smb/input /mnt/smb/processing /mnt/smb/output /mnt/smb/done /mnt/smb/failed
+WORKDIR /app
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY requirements.txt /app/requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-ENTRYPOINT ["/entrypoint.sh"]
+COPY main.py /app/main.py
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
