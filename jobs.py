@@ -1,124 +1,75 @@
-import asyncio
-import os
-import tempfile
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
+from typing import Optional
 
 import ocrmypdf
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
-
-from jobs import JobStatus, JobStore
-
-DEFAULT_LANGUAGES = os.environ.get("OCR_LANGUAGES", "fra+eng")
-MAX_WORKERS = int(os.environ.get("OCR_MAX_WORKERS", "2"))
-RESULT_TTL_SECONDS = int(os.environ.get("OCR_RESULT_TTL", "3600"))
-CLEANUP_INTERVAL_SECONDS = 300
-
-app = FastAPI(title="OCR Service", version="2.0.0")
-store = JobStore(max_workers=MAX_WORKERS, result_ttl_seconds=RESULT_TTL_SECONDS)
 
 
-@app.on_event("startup")
-async def start_cleanup_loop():
-    async def loop():
-        while True:
-            await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-            store.cleanup_expired()
-
-    asyncio.create_task(loop())
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    DONE = "done"
+    FAILED = "failed"
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+@dataclass
+class Job:
+    job_id: str
+    batch_id: str
+    filename: str
+    input_path: Path
+    output_path: Path
+    languages: str
+    force: bool
+    oversample: int = 0
+    deskew: bool = False
+    clean: bool = False
+    optimize: int = 1
+    output_type: str = "pdfa"
+    status: JobStatus = JobStatus.QUEUED
+    error: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
+    finished_at: Optional[float] = None
 
 
-@app.post("/ocr")
-def ocr(
-    file: UploadFile = File(...),
-    languages: str = Query(default=DEFAULT_LANGUAGES),
-    force: bool = Query(default=False),
-    oversample: int = Query(default=0),
-    deskew: bool = Query(default=False),
-    clean: bool = Query(default=False),
-    optimize: int = Query(default=1),
-    output_type: str = Query(default="pdfa"),
-):
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+class JobStore:
+    def __init__(self, max_workers: int = 2, result_ttl_seconds: int = 3600):
+        self._jobs: dict[str, Job] = {}
+        self._batches: dict[str, list[str]] = {}
+        self._lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._result_ttl = result_ttl_seconds
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="ocr_"))
-    input_path = tmp_dir / "input.pdf"
-    output_path = tmp_dir / "output.pdf"
+    def create_batch(self) -> str:
+        batch_id = uuid.uuid4().hex
+        with self._lock:
+            self._batches[batch_id] = []
+        return batch_id
 
-    with input_path.open("wb") as f:
-        f.write(file.file.read())
-
-    ocr_kwargs = dict(
-        language=languages,
-        force_ocr=force,
-        skip_text=not force,
-        deskew=deskew,
-        clean=clean,
-        optimize=optimize,
-        output_type=output_type,
-        progress_bar=False,
-    )
-    if oversample and oversample > 0:
-        ocr_kwargs["oversample"] = oversample
-
-    try:
-        ocrmypdf.ocr(
-            input_path,
-            output_path,
-            **ocr_kwargs,
-        )
-    except ocrmypdf.exceptions.PriorOcrFoundError:
-        raise HTTPException(
-            status_code=409,
-            detail="Document already contains text. Retry with force=true to re-OCR.",
-        )
-    except ocrmypdf.exceptions.EncryptedPdfError:
-        raise HTTPException(status_code=422, detail="Encrypted PDF is not supported.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
-
-    out_name = Path(file.filename).stem + "_ocr.pdf"
-    return FileResponse(
-        output_path,
-        media_type="application/pdf",
-        filename=out_name,
-    )
-
-
-@app.post("/ocr/jobs")
-def create_jobs(
-    files: list[UploadFile] = File(...),
-    languages: str = Query(default=DEFAULT_LANGUAGES),
-    force: bool = Query(default=False),
-    oversample: int = Query(default=0),
-    deskew: bool = Query(default=False),
-    clean: bool = Query(default=False),
-    optimize: int = Query(default=1),
-    output_type: str = Query(default="pdfa"),
-):
-    pdfs = [f for f in files if f.filename.lower().endswith(".pdf")]
-    if not pdfs:
-        raise HTTPException(status_code=400, detail="No PDF files in the request.")
-
-    batch_id = store.create_batch()
-    jobs_out = []
-
-    for f in pdfs:
-        tmp_dir = Path(tempfile.mkdtemp(prefix="ocr_"))
-        input_path = tmp_dir / "input.pdf"
-        output_path = tmp_dir / "output.pdf"
-        with input_path.open("wb") as out:
-            out.write(f.file.read())
-
-        job = store.add_job(
+    def add_job(
+        self,
+        batch_id: str,
+        filename: str,
+        input_path: Path,
+        output_path: Path,
+        languages: str,
+        force: bool,
+        oversample: int = 0,
+        deskew: bool = False,
+        clean: bool = False,
+        optimize: int = 1,
+        output_type: str = "pdfa",
+    ) -> Job:
+        job_id = uuid.uuid4().hex
+        job = Job(
+            job_id=job_id,
             batch_id=batch_id,
-            filename=f.filename,
+            filename=filename,
             input_path=input_path,
             output_path=output_path,
             languages=languages,
@@ -129,50 +80,91 @@ def create_jobs(
             optimize=optimize,
             output_type=output_type,
         )
-        jobs_out.append({"job_id": job.job_id, "filename": job.filename})
+        with self._lock:
+            self._jobs[job_id] = job
+            self._batches.setdefault(batch_id, []).append(job_id)
+        self._executor.submit(self._run, job_id)
+        return job
 
-    return {"batch_id": batch_id, "jobs": jobs_out}
+    def _run(self, job_id: str) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            job.status = JobStatus.PROCESSING
 
-
-@app.get("/ocr/jobs/{batch_id}")
-def batch_status(batch_id: str):
-    jobs = store.get_batch(batch_id)
-    if jobs is None:
-        raise HTTPException(status_code=404, detail="Batch not found.")
-
-    return {
-        "batch_id": batch_id,
-        "jobs": [
-            {
-                "job_id": j.job_id,
-                "filename": j.filename,
-                "status": j.status.value,
-                "error": j.error,
-            }
-            for j in jobs
-        ],
-    }
-
-
-@app.get("/ocr/jobs/{batch_id}/files/{job_id}")
-def download_result(batch_id: str, job_id: str):
-    job = store.get_job(job_id)
-    if job is None or job.batch_id != batch_id:
-        raise HTTPException(status_code=404, detail="Job not found.")
-
-    if job.status == JobStatus.FAILED:
-        raise HTTPException(status_code=422, detail=job.error or "OCR failed.")
-    if job.status != JobStatus.DONE:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Job is not ready (status: {job.status.value}).",
+        ocr_kwargs = dict(
+            language=job.languages,
+            force_ocr=job.force,
+            skip_text=not job.force,
+            deskew=job.deskew,
+            clean=job.clean,
+            optimize=job.optimize,
+            output_type=job.output_type,
+            progress_bar=False,
         )
-    if not job.output_path.exists():
-        raise HTTPException(status_code=410, detail="Result has expired.")
+        if job.oversample and job.oversample > 0:
+            ocr_kwargs["oversample"] = job.oversample
 
-    out_name = Path(job.filename).stem + "_ocr.pdf"
-    return FileResponse(
-        job.output_path,
-        media_type="application/pdf",
-        filename=out_name,
-    )
+        try:
+            ocrmypdf.ocr(
+                job.input_path,
+                job.output_path,
+                **ocr_kwargs,
+            )
+            new_status = JobStatus.DONE
+            error = None
+        except ocrmypdf.exceptions.PriorOcrFoundError:
+            new_status = JobStatus.FAILED
+            error = "Document already contains text. Retry with force=true to re-OCR."
+        except ocrmypdf.exceptions.EncryptedPdfError:
+            new_status = JobStatus.FAILED
+            error = "Encrypted PDF is not supported."
+        except Exception as exc:
+            new_status = JobStatus.FAILED
+            detail = str(exc).strip() or repr(exc)
+            error = f"{type(exc).__name__}: {detail}"
+            import traceback
+            traceback.print_exc()
+
+        with self._lock:
+            job.status = new_status
+            job.error = error
+            job.finished_at = time.time()
+
+    def get_job(self, job_id: str) -> Optional[Job]:
+        with self._lock:
+            return self._jobs.get(job_id)
+
+    def get_batch(self, batch_id: str) -> Optional[list[Job]]:
+        with self._lock:
+            job_ids = self._batches.get(batch_id)
+            if job_ids is None:
+                return None
+            return [self._jobs[jid] for jid in job_ids]
+
+    def cleanup_expired(self) -> None:
+        now = time.time()
+        with self._lock:
+            expired = [
+                jid
+                for jid, job in self._jobs.items()
+                if job.finished_at is not None
+                and now - job.finished_at > self._result_ttl
+            ]
+            for jid in expired:
+                job = self._jobs.pop(jid)
+                for p in (job.input_path, job.output_path):
+                    try:
+                        if p.exists():
+                            p.unlink()
+                    except OSError:
+                        pass
+                batch = self._batches.get(job.batch_id)
+                if batch and jid in batch:
+                    batch.remove(jid)
+            empty_batches = [
+                bid for bid, jids in self._batches.items() if not jids
+            ]
+            for bid in empty_batches:
+                self._batches.pop(bid, None)
