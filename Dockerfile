@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
 	ocrmypdf \
 	tesseract-ocr-eng \
 	tesseract-ocr-fra \
+	unpaper \
+	jbig2 \
 	python3 \
 	python3-pip \
 	&& rm -rf /var/lib/apt/lists/*
