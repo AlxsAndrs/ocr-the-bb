@@ -1,7 +1,7 @@
 # ocr-api
 
-Synchronous REST API for OCR. Upload a PDF, get back an OCR'd PDF with a
-searchable text layer, powered by OCRmyPDF.
+REST API for OCR, powered by OCRmyPDF. Supports both synchronous single-file
+OCR and asynchronous batch jobs.
 
 ## Setup
 
@@ -9,44 +9,60 @@ searchable text layer, powered by OCRmyPDF.
 docker compose up --build
 ```
 
-The service listens on port 8000. Interactive API docs are auto-generated at
-`http://<host>:8000/docs`.
+The service listens on container port 8000, published on host port 8100 by
+default (change in `docker-compose.yml`). Interactive docs at
+`http://<host>:8100/docs`.
+
+## Configuration (all optional)
+
+- `OCR_LANGUAGES` — default tesseract languages, `+`-joined (default `eng+fra`).
+- `OCR_MAX_WORKERS` — concurrent OCR jobs for the async queue (default `2`).
+- `OCR_RESULT_TTL` — seconds to keep finished results before cleanup
+  (default `3600`).
 
 ## Endpoints
 
 ### `GET /health`
-Liveness check. Returns `{"status": "ok"}`.
+Liveness check.
 
-### `POST /ocr`
-Upload a PDF, receive the OCR'd PDF in the response body.
+### `POST /ocr` (synchronous)
+Upload one PDF, get the OCR'd PDF back in the response. Blocks until done.
+Query params: `languages`, `force`.
 
-Query parameters:
-- `languages` — tesseract language codes joined with `+` (default: `eng+fra`).
-- `force` — set `true` to re-OCR documents that already contain text
-  (default: `false`, which skips pages that already have a text layer).
+### `POST /ocr/jobs` (asynchronous, batch)
+Upload one or more PDFs (repeat the `files` field). Returns immediately with a
+`batch_id` and a `job_id` per file. Query params: `languages`, `force`.
+
+### `GET /ocr/jobs/{batch_id}`
+Status of every file in the batch: `queued`, `processing`, `done`, or `failed`
+(with an error message on failure).
+
+### `GET /ocr/jobs/{batch_id}/files/{job_id}`
+Download one finished result. Returns 409 if not ready, 422 if that file
+failed, 410 if the result has expired past its TTL.
 
 ## Examples
 
 ```
-# basic
-curl -X POST http://localhost:8000/ocr \
-  -F "file=@document.pdf" \
-  -o document_ocr.pdf
+# synchronous single file
+curl -X POST http://<host>:8100/ocr \
+  -F "file=@document.pdf" -o document_ocr.pdf
 
-# specify languages
-curl -X POST "http://localhost:8000/ocr?languages=eng+deu" \
-  -F "file=@document.pdf" \
-  -o document_ocr.pdf
+# submit an async batch
+curl -X POST "http://<host>:8100/ocr/jobs?languages=eng+fra" \
+  -F "files=@a.pdf" -F "files=@b.pdf" -F "files=@c.pdf"
 
-# force re-OCR of a document that already has text
-curl -X POST "http://localhost:8000/ocr?force=true" \
-  -F "file=@document.pdf" \
-  -o document_ocr.pdf
+# check batch status
+curl http://<host>:8100/ocr/jobs/<batch_id>
+
+# download one finished result
+curl http://<host>:8100/ocr/jobs/<batch_id>/files/<job_id> -o a_ocr.pdf
 ```
 
 ## Notes
 
-- Synchronous: the connection stays open until OCR completes. For large scanned
-  documents this may take a while; an async job-based version is a planned
-  follow-up.
-- Only `.pdf` files are accepted.
+- Jobs and results are held in memory / temp storage inside the container.
+  A restart clears queued jobs and finished results — acceptable for an
+  internal service. If durability across restarts is needed, back the queue
+  with Redis and a separate worker.
+- Only `.pdf` files are accepted; non-PDF uploads in a batch are ignored.
