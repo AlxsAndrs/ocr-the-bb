@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
 	tesseract-ocr-fra \
 	unpaper \
 	jbig2 \
+	poppler-utils \
 	python3 \
 	python3-pip \
 	&& rm -rf /var/lib/apt/lists/*
