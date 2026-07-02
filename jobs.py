@@ -26,6 +26,11 @@ class Job:
     output_path: Path
     languages: str
     force: bool
+    oversample: int = 0
+    deskew: bool = False
+    clean: bool = False
+    optimize: int = 1
+    output_type: str = "pdfa"
     status: JobStatus = JobStatus.QUEUED
     error: Optional[str] = None
     created_at: float = field(default_factory=time.time)
@@ -54,6 +59,11 @@ class JobStore:
         output_path: Path,
         languages: str,
         force: bool,
+        oversample: int = 0,
+        deskew: bool = False,
+        clean: bool = False,
+        optimize: int = 1,
+        output_type: str = "pdfa",
     ) -> Job:
         job_id = uuid.uuid4().hex
         job = Job(
@@ -64,6 +74,11 @@ class JobStore:
             output_path=output_path,
             languages=languages,
             force=force,
+            oversample=oversample,
+            deskew=deskew,
+            clean=clean,
+            optimize=optimize,
+            output_type=output_type,
         )
         with self._lock:
             self._jobs[job_id] = job
@@ -78,14 +93,24 @@ class JobStore:
                 return
             job.status = JobStatus.PROCESSING
 
+        ocr_kwargs = dict(
+            language=job.languages,
+            force_ocr=job.force,
+            skip_text=not job.force,
+            deskew=job.deskew,
+            clean=job.clean,
+            optimize=job.optimize,
+            output_type=job.output_type,
+            progress_bar=False,
+        )
+        if job.oversample and job.oversample > 0:
+            ocr_kwargs["oversample"] = job.oversample
+
         try:
             ocrmypdf.ocr(
                 job.input_path,
                 job.output_path,
-                language=job.languages,
-                force_ocr=job.force,
-                skip_text=not job.force,
-                progress_bar=False,
+                **ocr_kwargs,
             )
             new_status = JobStatus.DONE
             error = None
