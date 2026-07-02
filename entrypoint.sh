@@ -11,6 +11,7 @@ LANGUAGES="${OCR_LANGUAGES:-eng+fra}"
 
 for d in "$INPUT_DIR" "$PROCESSING_DIR" "$OUTPUT_DIR" "$DONE_DIR" "$FAILED_DIR"; do
 	mkdir -p "$d"
+	chmod 777 "$d"
 done
 
 echo "Watching $INPUT_DIR for new files..."
