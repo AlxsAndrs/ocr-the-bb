@@ -6,8 +6,8 @@ services:
     container_name: ocr-api
     restart: unless-stopped
     environment:
-      - OCR_LANGUAGES=${OCR_LANGUAGES:-eng+fra}
-      - OCR_MAX_WORKERS=${OCR_MAX_WORKERS:-2}
+      - OCR_LANGUAGES=${OCR_LANGUAGES:-fra+eng}
+      - OCR_MAX_WORKERS=${OCR_MAX_WORKERS:-4}
       - OCR_RESULT_TTL=${OCR_RESULT_TTL:-3600}
     ports:
       - "8100:8000"
